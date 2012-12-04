@@ -69,16 +69,24 @@ ffi.cdef[[
 
 	typedef enum 
 	{	
-		GP_WIDGET_WINDOW,	/**< \brief Window widget
-		GP_WIDGET_SECTION,	/**< \brief Section widget (think Tab) */
-		GP_WIDGET_TEXT,		/**< \brief Text widget. */			/* char *		*/
-		GP_WIDGET_RANGE,	/**< \brief Slider widget. */			/* float		*/
-		GP_WIDGET_TOGGLE,	/**< \brief Toggle widget (think check box) */	/* int			*/
-		GP_WIDGET_RADIO,	/**< \brief Radio button widget. */		/* char *		*/
-		GP_WIDGET_MENU,		/**< \brief Menu widget (same as RADIO). */	/* char *		*/
-		GP_WIDGET_BUTTON,	/**< \brief Button press widget. */		/* CameraWidgetCallback */
-		GP_WIDGET_DATE		/**< \brief Date entering widget. */		/* int			*/
+		GP_WIDGET_WINDOW = 0,	/**< \brief Window widget
+		GP_WIDGET_SECTION = 1,	/**< \brief Section widget (think Tab) */
+		GP_WIDGET_TEXT = 2,		/**< \brief Text widget. */			/* char *		*/
+		GP_WIDGET_RANGE = 3,	/**< \brief Slider widget. */			/* float		*/
+		GP_WIDGET_TOGGLE = 4,	/**< \brief Toggle widget (think check box) */	/* int			*/
+		GP_WIDGET_RADIO = 5,	/**< \brief Radio button widget. */		/* char *		*/
+		GP_WIDGET_MENU = 6,		/**< \brief Menu widget (same as RADIO). */	/* char *		*/
+		GP_WIDGET_BUTTON = 7,	/**< \brief Button press widget. */		/* CameraWidgetCallback */
+		GP_WIDGET_DATE = 8		/**< \brief Date entering widget. */		/* int			*/
 	} CameraWidgetType;
+
+	typedef enum {
+		GP_EVENT_UNKNOWN,	/**< unknown and unhandled event */
+		GP_EVENT_TIMEOUT,	/**< timeout, no arguments */
+		GP_EVENT_FILE_ADDED,	/**< CameraFilePath* = file path on camfs */
+		GP_EVENT_FOLDER_ADDED,	/**< CameraFilePath* = folder on camfs */
+		GP_EVENT_CAPTURE_COMPLETE	/**< last capture is complete */
+	} CameraEventType;
 
 	typedef struct
 	{
@@ -305,24 +313,88 @@ end
 function camera_methods:getConfig(name)
 	local widget = self:getConfigWidget()
 	local widgetChild = lookupWidget(widget, name)
-	local widgetType = libgphoto2.gp_widget_get_type(widgetChild)
+
+	local widgetType = ffi.new("CameraWidgetType[1]")
+	local status = libgphoto2.gp_widget_get_type(widgetChild, widgetType)
+	if status ~= Results.Ok then error("Failed to get widget type: " .. resultToString(status)) end
 
 	local target = ffi.new("void*[1]")
 
-	local status = libgphoto2.gp_widget_get_value(widgetChild, target)
+	status = libgphoto2.gp_widget_get_value(widgetChild, target)
 	if status ~= Results.Ok then error("Failed to get widget value: " .. resultToString(status)) end
 
-	if widgetType == libgphoto2.GP_WIDGET_TEXT then
-		return ffi.string(target[0])
+	local ret
+
+	if widgetType[0] == libgphoto2.GP_WIDGET_TEXT then
+		ret = ffi.string(target[0])
+	elseif widgetType[0] == libgphoto2.GP_WIDGET_RANGE then
+		ret = tonumber(target[0])
+	elseif widgetType[0] == libgphoto2.GP_WIDGET_TOGGLE then
+		ret = tonumber(target[0])
+	elseif widgetType[0] == libgphoto2.GP_WIDGET_RADIO then
+		ret = ffi.string(target[0])
+	elseif widgetType[0] == libgphoto2.GP_WIDGET_MENU then
+		-- NYI
+	elseif widgetType[0] == libgphoto2.GP_WIDGET_BUTTON then
+		-- NYI
+	elseif widgetType[0] == libgphoto2.GP_WIDGET_DATE then
+		ret = tonumber(target[0])
+	end
+
+	if ret == nil then return end
+	return ret, widgetType[0]
+end
+
+function camera_methods:setConfig(name, value)
+	local widget = self:getConfigWidget()
+	
+	if value == nil and type(name) == "table" then
+		for k,v in pairs(name) do self:setConfig(k, v) end
+	else		
+		local widgetChild = lookupWidget(widget, name)
+
+		local widgetType = ffi.new("CameraWidgetType[1]")
+		local status = libgphoto2.gp_widget_get_type(widgetChild, widgetType)
+		if status ~= Results.Ok then error("Failed to get widget type: " .. resultToString(status)) end
+
+		local pushValue
+		if widgetType[0] == libgphoto2.GP_WIDGET_TEXT then
+			assert(type(value) == "string", name.." must be a string!")
+			pushValue = value
+		elseif widgetType[0] == libgphoto2.GP_WIDGET_RANGE then
+			assert(type(value) == "number", name.." must be a number!")
+			pushValue = ffi.new("float[1]", value)
+		elseif widgetType[0] == libgphoto2.GP_WIDGET_TOGGLE then
+			assert(type(value) == "number", name.." must be an integer!")
+			pushValue = ffi.new("int[1]", value)
+		elseif widgetType[0] == libgphoto2.GP_WIDGET_RADIO then
+			assert(type(value) == "string", name.." must be a string!")
+			pushValue = value
+		elseif widgetType[0] == libgphoto2.GP_WIDGET_MENU then
+			assert(type(value) == "string", name.." must be a string!")
+			pushValue = value
+		elseif widgetType[0] == libgphoto2.GP_WIDGET_BUTTON then
+			-- NYI
+			assert(false)
+		elseif widgetType[0] == libgphoto2.GP_WIDGET_DATE then
+			assert(type(value) == "number", name.." must be a date!")
+			pushValue = ffi.new("int[1]", value)
+		end
+
+		status = libgphoto2.gp_widget_set_value(widgetChild, pushValue)
+		if status ~= Results.Ok then error("Failed to set widget value: " .. resultToString(status)) end
+
+		status = libgphoto2.gp_camera_set_config(self, widget, context)
+		if status ~= Results.Ok then error("Failed to set widget value: " .. resultToString(status)) end
 	end
 end
 
 function camera_methods:lensName()
-	return getConfig("lensname")
+	return self:getConfig("lensname")
 end
 
-function camera_methods:setConfig(name, value)
-
+function camera_methods:setAperture(value)
+	self:setConfig("aperture", value)
 end
 
 function camera_methods:waitForEvent()
@@ -341,16 +413,18 @@ function camera_methods:waitForEvent()
 	return event_type[0], data
 end
 
-function camera_methods:capture(capture_type)
+function camera_methods:capture(captureType, settings)
+	if settings ~= nil then self:setConfig(settings) end
+
 	local cameraFilePath = ffi.new("CameraFilePath");
-	local status = libgphoto2.gp_camera_capture(self, capture_type, cameraFilePath, context)
+	local status = libgphoto2.gp_camera_capture(self, captureType, cameraFilePath, context)
 	if status ~= Results.Ok then error("Failed to capture image: " .. resultToString(status)) end
 
 	return ffi.string(cameraFilePath.name), ffi.string(cameraFilePath.folder)
 end
 
-function camera_methods:captureImage()
-	return self:capture(CameraCaptureType.Image)
+function camera_methods:captureImage(settings)
+	return self:capture(CameraCaptureType.Image, settings)
 end
 
 function camera_methods:close()
@@ -358,7 +432,7 @@ function camera_methods:close()
 end
 camera_mt.__gc = camera_methods.close
 
-ffi.metatype("Camera", mt)
+ffi.metatype("Camera", camera_mt)
 
 return
 {
