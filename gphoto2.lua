@@ -7,17 +7,17 @@ ffi.cdef[[
 
 	typedef enum 
 	{
-		GP_CAPTURE_IMAGE,	
-		GP_CAPTURE_MOVIE,	
-		GP_CAPTURE_SOUND	
+		GP_CAPTURE_IMAGE = 0,	
+		GP_CAPTURE_MOVIE = 1,	
+		GP_CAPTURE_SOUND = 2	
 	} CameraCaptureType;
 
 	typedef enum 
 	{
-		GP_DRIVER_STATUS_PRODUCTION,	/**< Driver is production ready. */
-		GP_DRIVER_STATUS_TESTING,	/**< Driver is beta quality. */
-		GP_DRIVER_STATUS_EXPERIMENTAL,	/**< Driver is alpha quality and might even not work. */
-		GP_DRIVER_STATUS_DEPRECATED	/**< Driver is no longer recommended to use and will be removed. */
+		GP_DRIVER_STATUS_PRODUCTION = 0,	/**< Driver is production ready. */
+		GP_DRIVER_STATUS_TESTING = 1,		/**< Driver is beta quality. */
+		GP_DRIVER_STATUS_EXPERIMENTAL = 2,	/**< Driver is alpha quality and might even not work. */
+		GP_DRIVER_STATUS_DEPRECATED = 3		/**< Driver is no longer recommended to use and will be removed. */
 	} CameraDriverStatus;
 
 	typedef enum 
@@ -28,7 +28,7 @@ ffi.cdef[[
 
 	typedef enum 
 	{
-			GP_OPERATION_NONE       	= 0,	  /**< No remote control operation supported. */
+			GP_OPERATION_NONE       		= 0,	  /**< No remote control operation supported. */
 			GP_OPERATION_CAPTURE_IMAGE      = 1 << 0, /**< Capturing images supported. */
 			GP_OPERATION_CAPTURE_VIDEO      = 1 << 1, /**< Capturing videos supported. */
 			GP_OPERATION_CAPTURE_AUDIO      = 1 << 2, /**< Capturing audio supported. */
@@ -71,21 +71,21 @@ ffi.cdef[[
 	{	
 		GP_WIDGET_WINDOW = 0,	/**< \brief Window widget
 		GP_WIDGET_SECTION = 1,	/**< \brief Section widget (think Tab) */
-		GP_WIDGET_TEXT = 2,		/**< \brief Text widget. */			/* char *		*/
-		GP_WIDGET_RANGE = 3,	/**< \brief Slider widget. */			/* float		*/
+		GP_WIDGET_TEXT = 2,		/**< \brief Text widget. */						/* char *		*/
+		GP_WIDGET_RANGE = 3,	/**< \brief Slider widget. */					/* float		*/
 		GP_WIDGET_TOGGLE = 4,	/**< \brief Toggle widget (think check box) */	/* int			*/
-		GP_WIDGET_RADIO = 5,	/**< \brief Radio button widget. */		/* char *		*/
-		GP_WIDGET_MENU = 6,		/**< \brief Menu widget (same as RADIO). */	/* char *		*/
-		GP_WIDGET_BUTTON = 7,	/**< \brief Button press widget. */		/* CameraWidgetCallback */
-		GP_WIDGET_DATE = 8		/**< \brief Date entering widget. */		/* int			*/
+		GP_WIDGET_RADIO = 5,	/**< \brief Radio button widget. */				/* char *		*/
+		GP_WIDGET_MENU = 6,		/**< \brief Menu widget (same as RADIO). */		/* char *		*/
+		GP_WIDGET_BUTTON = 7,	/**< \brief Button press widget. */				/* CameraWidgetCallback */
+		GP_WIDGET_DATE = 8		/**< \brief Date entering widget. */			/* int			*/
 	} CameraWidgetType;
 
 	typedef enum {
-		GP_EVENT_UNKNOWN,	/**< unknown and unhandled event */
-		GP_EVENT_TIMEOUT,	/**< timeout, no arguments */
-		GP_EVENT_FILE_ADDED,	/**< CameraFilePath* = file path on camfs */
-		GP_EVENT_FOLDER_ADDED,	/**< CameraFilePath* = folder on camfs */
-		GP_EVENT_CAPTURE_COMPLETE	/**< last capture is complete */
+		GP_EVENT_UNKNOWN = 0,			/**< unknown and unhandled event */
+		GP_EVENT_TIMEOUT = 1,			/**< timeout, no arguments */
+		GP_EVENT_FILE_ADDED = 2,		/**< CameraFilePath* = file path on camfs */
+		GP_EVENT_FOLDER_ADDED = 3,		/**< CameraFilePath* = folder on camfs */
+		GP_EVENT_CAPTURE_COMPLETE = 4	/**< last capture is complete */
 	} CameraEventType;
 
 	typedef struct
@@ -258,146 +258,318 @@ CameraEvent.FileAdded = libgphoto2.GP_EVENT_FILE_ADDED
 CameraEvent.FolderAdded = libgphoto2.GP_EVENT_FOLDER_ADDED
 CameraEvent.CaptureComplete = libgphoto2.GP_EVENT_CAPTURE_COMPLETE
 
+local widgetTypeLookup = {}
+widgetTypeLookup[tonumber(libgphoto2.GP_WIDGET_WINDOW)] = "window"
+widgetTypeLookup[1] = "section"
+widgetTypeLookup[tonumber(libgphoto2.GP_WIDGET_TEXT)] = "text"
+widgetTypeLookup[tonumber(libgphoto2.GP_WIDGET_RANGE)] = "range"
+widgetTypeLookup[tonumber(libgphoto2.GP_WIDGET_TOGGLE)] = "toggle"
+widgetTypeLookup[tonumber(libgphoto2.GP_WIDGET_RADIO)] = "radio"
+widgetTypeLookup[tonumber(libgphoto2.GP_WIDGET_MENU)] = "menu"
+widgetTypeLookup[tonumber(libgphoto2.GP_WIDGET_BUTTON)] = "button"
+widgetTypeLookup[tonumber(libgphoto2.GP_WIDGET_DATE)] = "date"
+
 local function resultToString(result)
 	return ffi.string(libgphoto2.gp_port_result_as_string(result))
 end
 
-local function acquireCamera()
-	if context == nil then context = libgphoto2.gp_context_new() end
-	
-	local camera = ffi.new("Camera*[1]")
-	local status = libgphoto2.gp_camera_new(camera)
-	if status ~= Results.Ok then error("Failed to acquire camera: " .. resultToString(status)) end
-
-	status = libgphoto2.gp_camera_init(camera[0], context)
-	if status ~= Results.Ok then error("Failed to acquire camera: " .. resultToString(status)) end
-
-	return camera[0]
+local function lookupWidgetById(widget, id) 
+	local child = ffi.new("CameraWidget*[1]")
+	local status = libgphoto2.gp_widget_get_child_by_id(widget, id, child);
+	if status ~= Results.Ok then error("Failed to find child widget '"..id.."': " .. resultToString(status)) end
+	return child[0];
 end
 
-local function lookupWidget(widget, key) 
-	local widgetChild = ffi.new("CameraWidget*[1]")
-	local status = libgphoto2.gp_widget_get_child_by_name(widget, key, widgetChild);
-	if status ~= Results.Ok then 
-		status = libgphoto2.gp_widget_get_child_by_label(widget, key, widgetChild);
-		if status ~= Results.Ok then error("Failed to find child widget: " .. resultToString(status)) end
+local function lookupWidgetByName(widget, name) 
+	local child = ffi.new("CameraWidget*[1]")
+	local status = libgphoto2.gp_widget_get_child_by_name(widget, name, child);
+	if status ~= Results.Ok then error("Failed to find child widget '"..name.."': " .. resultToString(status)) end	
+	return child[0]
+end
+
+
+Class = {}
+function Class:new(super)
+    local class, metatable, properties = {}, {}, {}
+    class.metatable = metatable
+    class.properties = properties
+
+    function metatable:__index(key)
+        local prop = properties[key]
+        if prop then
+            return prop.get(self)
+        elseif class[key] ~= nil then
+            return class[key]
+        elseif super then
+            return super.metatable.__index(self, key)
+        else
+            return nil
+        end
+    end
+
+    function metatable:__newindex(key, value)
+        local prop = properties[key]
+        if prop then
+            return prop.set(self, value)
+        elseif super then
+            return super.metatable.__newindex(self, key, value)
+        else
+            rawset(self, key, value)
+        end
+    end
+
+    function class:new(...)
+        local obj = setmetatable({}, self.metatable)
+        if obj.__new then
+            obj:__new(...)
+        end
+        return obj
+    end
+
+    return class
+end
+
+local Camera = Class:new()
+function Camera:__new()
+	self.handlePtr = ffi.new("Camera*[1]")
+	local status = libgphoto2.gp_camera_new(self.handlePtr)
+	if status ~= Results.Ok then error("Failed to acquire camera: " .. resultToString(status)) end
+
+	self.handle = self.handlePtr[0]
+	status = libgphoto2.gp_camera_init(self.handle, context)
+	if status ~= Results.Ok then error("Failed to acquire camera: " .. resultToString(status)) end	
+
+	local abilities = ffi.new("CameraAbilities")
+	local status = libgphoto2.gp_camera_get_abilities(self.handle, abilities)
+	if status ~= Results.Ok then error("Failed to get camera abilities: " .. resultToString(status)) end
+
+	self.model = ffi.string(abilities.model)
+
+	self:updateParameters()
+end
+
+function Camera:updateParameters()
+	self.parameters = {}
+
+	local widget = self:getRootWidget()
+	self:parseParameters(widget, "")
+	libgphoto2.gp_widget_free(widget)
+
+	self.properties = {}
+	for k,v in pairs(self.parameters) do
+		self:registerParameterProperty(k)
+	end
+end
+
+function Camera:parseParameters(widget, parentName)
+	local widgetType = ffi.new("CameraWidgetType[1]")
+	local status = libgphoto2.gp_widget_get_type(widget, widgetType)
+	if status ~= Results.Ok then error("Failed to get widget type: " .. resultToString(status)) end
+
+	local name = ffi.new("const char*[1]")
+	local status = libgphoto2.gp_widget_get_name(widget, name)
+	if status ~= Results.Ok then error("Failed to get widget name: " .. resultToString(status)) end
+
+	name = ffi.string(name[0])
+	local fullName =  parentName..'/'..name
+
+	if widgetType[0] ~= libgphoto2.GP_WIDGET_WINDOW and widgetType[0] ~= 1 then
+		local id = ffi.new("int[1]")
+		status = libgphoto2.gp_widget_get_id(widget, id)
+		if status ~= Results.Ok then error("Failed to get widget ID: " .. resultToString(status)) end
+
+		local label = ffi.new("const char*[1]")
+		status = libgphoto2.gp_widget_get_label(widget, label)
+		if status ~= Results.Ok then error("Failed to get widget label: " .. resultToString(status)) end
+
+		local readOnly = ffi.new("int[1]")
+		status = libgphoto2.gp_widget_get_readonly(widget, readOnly)
+		if status ~= Results.Ok then error("Failed to get read only status: " .. resultToString(status)) end
+
+		local ret = {}
+		ret.name = name
+		ret.fullName = fullName
+		ret.type = tonumber(widgetType[0])
+		ret.typeName = widgetTypeLookup[ret.type]
+		ret.id = id[0]--tonumber(id[0])
+		ret.label = ffi.string(label[0])
+		if readOnly[0] == 0 then ret.readOnly = false else ret.readOnly = true end
+
+		if widgetType[0] == libgphoto2.GP_WIDGET_RANGE then
+			local min = ffi.new("float[1]")
+			local max = ffi.new("float[1]")
+			local increment = ffi.new("float[1]")
+			status = libgphoto2.gp_widget_get_range(widget, min, max, increment)
+			if status ~= Results.Ok then error("Failed to get value range: " .. resultToString(status)) end
+
+			ret.min = tonumber(min[0])
+			ret.max = tonumber(max[0])
+			ret.increment = tonumber(increment[0])
+			ret.range = ret.max - ret.min
+		end
+
+		if widgetType[0] == libgphoto2.GP_WIDGET_RADIO then
+			ret.choices = {}
+			local choiceCount = libgphoto2.gp_widget_count_choices(widget)
+			for i=0, choiceCount-1 do
+				local choice = ffi.new("const char*[1]")
+				status = libgphoto2.gp_widget_get_choice(widget, i, choice)
+				if status ~= Results.Ok then error("Failed to get widget label: " .. resultToString(status)) end
+
+				table.insert(ret.choices, ffi.string(choice[0]))
+			end
+		end
+
+		self.parameters[name] = ret
 	end
 
-	return widgetChild[0];
+	local childCount = libgphoto2.gp_widget_count_children(widget)
+	for i=0, childCount-1 do
+		local child = ffi.new("CameraWidget*[1]")
+		local status = libgphoto2.gp_widget_get_child(widget, i, child)
+		if status ~= Results.Ok then error("Failed to get child widget: " .. resultToString(status)) end
+
+		self:parseParameters(child[0], fullName)
+	end
+
+	return target
 end
 
-local camera_methods = {}
-local camera_mt = { __index = camera_methods }
-
-function camera_methods:abilities()
-	local status
-	--int gp_camera_get_abilities(Camera* camera, CameraAbilities* abilities);	
+function Camera:registerParameterProperty(propertyName, configName)
+	if configName == nil then configName = string.lower(propertyName) end
+	if Camera.properties[propertyName] == nil then Camera.properties[propertyName] = {} end
+	Camera.properties[propertyName].get = function(self) return self:getParameter(configName) end
+	Camera.properties[propertyName].set = function(self, value) self:setParameter(configName, value) end
 end
-		
-function camera_methods:summary()
+
+Camera.properties.summary = {}
+function Camera.properties.summary:get()  
 	local text = ffi.new("CameraText")
-	local status = libgphoto2.gp_camera_get_summary(self, text, context);
+	local status = libgphoto2.gp_camera_get_summary(self.handle, text, context);
 	if status ~= Results.Ok then error("Failed to get camera summary: " .. resultToString(status)) end
-
 	return ffi.string(text.text)
 end
-
-function camera_methods:getConfigWidget()
+		
+function Camera:getRootWidget()
 	local widget = ffi.new("CameraWidget*[1]")
-	local status = libgphoto2.gp_camera_get_config(self, widget, context);
+	local status = libgphoto2.gp_camera_get_config(self.handle, widget, context);
 	if status ~= Results.Ok then error("Failed to get camera configuration: " .. resultToString(status)) end
 
 	return widget[0]
 end
 
-function camera_methods:getConfig(name)
-	local widget = self:getConfigWidget()
-	local widgetChild = lookupWidget(widget, name)
+function Camera:widgetExists(name)
+	local rootWidget = self:getRootWidget()
+	local exists = lookupWidgetByName(rootWidget, name) ~= nil
+	libgphoto2.gp_widget_free(widget)
+	return exists
+end
 
-	local widgetType = ffi.new("CameraWidgetType[1]")
-	local status = libgphoto2.gp_widget_get_type(widgetChild, widgetType)
-	if status ~= Results.Ok then error("Failed to get widget type: " .. resultToString(status)) end
+function Camera:getParameterInfo(name)
+	local ret = self.parameters[name]
+	
+	-- Parameter not found - do one last check on the camera to see if it's available
+	if ret == nil and self:widgetExists(name) then 
+		-- Exists, parameters are out of date
+		self:updateParameters() 
+		-- Look again...
+		ret = self.parameters[name]
+		if ret == nil then 
+			error("Parameter '"..name.."' does not exist!") 
+		end
+	end
+
+	return ret
+end
+
+function Camera:getParameter(name)
+	local info = self:getParameterInfo(name)
+	local rootWidget = self:getRootWidget()
+	--local widget = lookupWidgetById(rootWidget, info.id)
+	local widget = lookupWidgetByName(rootWidget, name)
 
 	local target = ffi.new("void*[1]")
-
-	status = libgphoto2.gp_widget_get_value(widgetChild, target)
+	status = libgphoto2.gp_widget_get_value(widget, target)
 	if status ~= Results.Ok then error("Failed to get widget value: " .. resultToString(status)) end
 
 	local ret
-
-	if widgetType[0] == libgphoto2.GP_WIDGET_TEXT then
+	if info.typeName == "text" or info.typeName == "radio" or info.typeName == "menu" then
 		ret = ffi.string(target[0])
-	elseif widgetType[0] == libgphoto2.GP_WIDGET_RANGE then
+	elseif info.typeName == "range" or info.typeName == "toggle" then
 		ret = tonumber(target[0])
-	elseif widgetType[0] == libgphoto2.GP_WIDGET_TOGGLE then
+	elseif info.typeName == "date" then
 		ret = tonumber(target[0])
-	elseif widgetType[0] == libgphoto2.GP_WIDGET_RADIO then
-		ret = ffi.string(target[0])
-	elseif widgetType[0] == libgphoto2.GP_WIDGET_MENU then
+	elseif info.typeName == "window" then
 		-- NYI
-	elseif widgetType[0] == libgphoto2.GP_WIDGET_BUTTON then
+	elseif info.typeName == "section" then
 		-- NYI
-	elseif widgetType[0] == libgphoto2.GP_WIDGET_DATE then
-		ret = tonumber(target[0])
+	elseif info.typeName == "button" then
+		-- NYI
 	end
 
-	if ret == nil then return end
-	return ret, widgetType[0]
+	libgphoto2.gp_widget_free(rootWidget)
+
+	return ret
 end
 
-function camera_methods:setConfig(name, value)
-	local widget = self:getConfigWidget()
-	
-	if value == nil and type(name) == "table" then
-		for k,v in pairs(name) do self:setConfig(k, v) end
-	else		
-		local widgetChild = lookupWidget(widget, name)
+function Camera:setParameters(values)
+	for k,v in pairs(name) do self:setParameter(k, v) end
+end 
 
-		local widgetType = ffi.new("CameraWidgetType[1]")
-		local status = libgphoto2.gp_widget_get_type(widgetChild, widgetType)
-		if status ~= Results.Ok then error("Failed to get widget type: " .. resultToString(status)) end
+function Camera:setParameter(name, value)
+	local info = self:getParameterInfo(name)
+	local rootWidget = self:getRootWidget()
+	--local widget = lookupWidgetById(rootWidget, info.id)
+	local widget = lookupWidgetByName(rootWidget, name)
 
-		local pushValue
-		if widgetType[0] == libgphoto2.GP_WIDGET_TEXT then
-			assert(type(value) == "string", name.." must be a string!")
-			pushValue = value
-		elseif widgetType[0] == libgphoto2.GP_WIDGET_RANGE then
-			assert(type(value) == "number", name.." must be a number!")
-			pushValue = ffi.new("float[1]", value)
-		elseif widgetType[0] == libgphoto2.GP_WIDGET_TOGGLE then
-			assert(type(value) == "number", name.." must be an integer!")
-			pushValue = ffi.new("int[1]", value)
-		elseif widgetType[0] == libgphoto2.GP_WIDGET_RADIO then
-			assert(type(value) == "string", name.." must be a string!")
-			pushValue = value
-		elseif widgetType[0] == libgphoto2.GP_WIDGET_MENU then
-			assert(type(value) == "string", name.." must be a string!")
-			pushValue = value
-		elseif widgetType[0] == libgphoto2.GP_WIDGET_BUTTON then
-			-- NYI
-			assert(false)
-		elseif widgetType[0] == libgphoto2.GP_WIDGET_DATE then
-			assert(type(value) == "number", name.." must be a date!")
-			pushValue = ffi.new("int[1]", value)
+	local pushValue
+	if info.typeName == "text" or info.typeName == "radio" or info.typeName == "menu" then
+
+		assert(type(value) == "string", name.." must be a string!")
+		pushValue = value
+
+	elseif info.typeName == "range" then
+		
+		-- TODO: We need to make sure that the value the user has provided is in the range specified by the camera
+		assert(type(value) == "number", name.." must be a number!")
+		pushValue = ffi.new("float[1]", value)
+
+	elseif info.typeName == "toggle" then
+		
+		-- Must be a boolean or a number.
+		if type(value) == "boolean" then
+			if value == true then value = 1 else value = 0 end
+		elseif type(value) == "number" then
+			if value < 0 then value = 0 end
+			if value > 1 then value = 1 end
+		else
+			error(name.." must be a bool or an integer!")
 		end
 
-		status = libgphoto2.gp_widget_set_value(widgetChild, pushValue)
-		if status ~= Results.Ok then error("Failed to set widget value: " .. resultToString(status)) end
+		pushValue = ffi.new("int[1]", value)
 
-		status = libgphoto2.gp_camera_set_config(self, widget, context)
-		if status ~= Results.Ok then error("Failed to set widget value: " .. resultToString(status)) end
+	elseif info.typeName == "button" then
+
+		-- NYI
+		error("Not implemented")
+
+	elseif info.typeName == "date" then
+
+		assert(type(value) == "number", name.." must be a date!")
+		pushValue = ffi.new("int[1]", value)
+		
 	end
+
+	status = libgphoto2.gp_widget_set_value(widget, pushValue)
+	if status ~= Results.Ok then error("Failed to set widget value: " .. resultToString(status)) end
+
+	status = libgphoto2.gp_camera_set_config(self.handle, rootWidget, context)
+	if status ~= Results.Ok then error("Failed to set widget value: " .. resultToString(status)) end
+
+	libgphoto2.gp_widget_free(rootWidget)
 end
 
-function camera_methods:lensName()
-	return self:getConfig("lensname")
-end
-
-function camera_methods:setAperture(value)
-	self:setConfig("aperture", value)
-end
-
-function camera_methods:waitForEvent()
+function Camera:waitForEvent(timeout)
 	if timeout == nil then timeout = 1000 end
 		
 	local event_type = ffi.new("CameraEventType[1]")
@@ -413,30 +585,37 @@ function camera_methods:waitForEvent()
 	return event_type[0], data
 end
 
-function camera_methods:capture(captureType, settings)
-	if settings ~= nil then self:setConfig(settings) end
+function Camera:capture(captureType, settings)
+	if settings ~= nil then self:setParameters(settings) end
 
 	local cameraFilePath = ffi.new("CameraFilePath");
-	local status = libgphoto2.gp_camera_capture(self, captureType, cameraFilePath, context)
+	local status = libgphoto2.gp_camera_capture(self.handle, captureType, cameraFilePath, context)
 	if status ~= Results.Ok then error("Failed to capture image: " .. resultToString(status)) end
 
 	return ffi.string(cameraFilePath.name), ffi.string(cameraFilePath.folder)
 end
 
-function camera_methods:captureImage(settings)
+function Camera:captureImage(settings)
 	return self:capture(CameraCaptureType.Image, settings)
 end
 
-function camera_methods:close()
+function Camera:captureVideo(settings)
+	return self:capture(CameraCaptureType.Movie, settings)
+end
+
+function Camera:captureSound(settings)
+	return self:capture(CameraCaptureType.Sound, settings)
+end
+
+function Camera:close()
 	libgphoto2.gp_camera_exit(self, context)
 end
-camera_mt.__gc = camera_methods.close
 
-ffi.metatype("Camera", camera_mt)
+Camera.__gc = Camera.close
 
-return
-{
-	acquireCamera = acquireCamera,
-	CameraCaptureType = CameraCaptureType,
-	lookupWidget = lookupWidget
-}
+local function acquireCamera()
+	if context == nil then context = libgphoto2.gp_context_new() end
+	return Camera:new()
+end
+
+return { acquireCamera = acquireCamera }
