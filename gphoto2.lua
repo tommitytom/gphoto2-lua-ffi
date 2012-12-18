@@ -357,8 +357,40 @@ function Camera:updateParameters()
 
 	self.properties = {}
 	for k,v in pairs(self.parameters) do
-		self:registerParameterProperty(k)
+		if k ~= "aperture" then
+			self:registerParameterProperty(k)
+		end
 	end
+
+	self.autoApertureExists =  false
+	local apertureInfo = self:getParameterInfo("aperture")
+	if apertureInfo ~= nil then
+		local lastAperture = 0
+
+		for _,v in pairs(apertureInfo.apertureChoices) do
+			local aperture = tonumber(v)
+			if aperture ~= nil then
+				local apertureSetting = {}
+				apertureSetting.start = lastAperture
+				apertureSetting.end = aperture
+				apertureSetting.range = aperture - lastAperture
+				
+				table.insert(self.apertureChoices, apertureSetting)
+
+				lastAperture = aperture
+			else
+				-- Not numeric!  Check to see if this is an auto value...
+				if aperture == "Auto" then
+					self.autoApertureExists = true
+				else
+					-- Error...
+					warning("Unknown aperture setting '"..aperture.."'")
+				end
+			end
+		end
+	end
+
+	self.autoShutterExists = false
 end
 
 function Camera:parseParameters(widget, parentName)
@@ -448,6 +480,30 @@ function Camera.properties.summary:get()
 	local status = libgphoto2.gp_camera_get_summary(self.handle, text, context);
 	if status ~= Results.Ok then error("Failed to get camera summary: " .. resultToString(status)) end
 	return ffi.string(text.text)
+end
+
+Camera.properties.aperture = {}
+function Camera.properties.summary:get()  
+	return self:getParameter("aperture")
+end
+function Camera.properties.summary:set(value) 
+	local info = self:getParameter("aperture")
+
+	if type(value) == "string" then
+		if table.contains(info.choices, value) then
+			self:setParameter("aperture", value)
+		else
+
+		end
+	elseif type(value) == "number" then
+		local lastChoice = self.apertureChoices[1]
+
+		for i=2, #self.apertureChoices do
+			if value < v then
+				self:setParameter("aperture", tostring())
+			end
+		end
+	end
 end
 		
 function Camera:getRootWidget()
